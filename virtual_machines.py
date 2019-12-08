@@ -31,6 +31,8 @@ class IntCodeMachine:
         self.input_buffer = []
         self.output_buffer = []
         self.halt_code = halt_code
+        self.paused = False
+        self.halted = False
 
         self.lookup_table = {
             1: (self.math2, {'func': add}),
@@ -54,9 +56,11 @@ class IntCodeMachine:
 
     def run(self, *, offset=0):
         self.ip += offset
-        while (opcode := self.read(mode=1)) % 100 != self.halt_code:
+        self.paused = False
+        while (opcode := self.read(mode=1)) % 100 != self.halt_code and not self.paused:
             func, args = self.lookup_table[opcode % 100]
             func(opcode, **args)
+        self.halted = opcode % 100 == self.halt_code
 
     def read(self, mode=0, offset=0):
         if mode:
@@ -83,18 +87,21 @@ class IntCodeMachine:
         if write:
             self.output_buffer.append(self.read(mode=mode, offset=1))
         else:
-            self.write(self.input_buffer.pop(), 1)
+            if not self.input_buffer:
+                self.paused = True
+                return f'{opcode=}, {mode=}, paused'
+            self.write(self.input_buffer.pop(0), 1)
         self.ip += 2
         return f'{opcode=}, {mode=}'
 
     @debug_wrapper
     def jump(self, opcode, jmp_if_false):
         a_mode, b_mode, _ = get_param_modes(opcode)
-        val, jmp_add = self.read_block(2, (a_mode, b_mode))
+        val, jmp_to = self.read_block(2, (a_mode, b_mode))
         if jmp_if_false and not val:
-            self.ip = jmp_add
+            self.ip = jmp_to
         elif not jmp_if_false and val:
-            self.ip = jmp_add
+            self.ip = jmp_to
         else:
             self.ip += 3
-        return f'{opcode=}, {jmp_if_false=}, {val=}, {jmp_add=}'
+        return f'{opcode=}, {jmp_if_false=}, {val=}, {jmp_to=}'
