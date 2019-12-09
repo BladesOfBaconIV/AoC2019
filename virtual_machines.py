@@ -17,6 +17,9 @@ def debug_wrapper(func):
 
 def load_program(program):
     memory = defaultdict(int)
+    if type(program) is str:
+        with open(program, 'r') as f:
+            program = list(map(int, f.read().split(',')))
     for address, value in enumerate(program):
         memory[address] = value
     return memory
@@ -33,6 +36,7 @@ class IntCodeMachine:
         self.halt_code = halt_code
         self.paused = False
         self.halted = False
+        self.rel_ip = 0
 
         self.lookup_table = {
             1: (self.math2, {'func': add}),
@@ -43,6 +47,7 @@ class IntCodeMachine:
             6: (self.jump, {'jmp_if_false': True}),
             7: (self.math2, {'func': lt}),
             8: (self.math2, {'func': eq}),
+            9: (self.rel_ip_change, {}),
         }
 
         self.debug = debug
@@ -53,6 +58,7 @@ class IntCodeMachine:
         self.program = self.program if not new_program else new_program
         self.memory = load_program(self.program)
         self.ip = 0
+        self.rel_ip = 0
 
     def run(self, *, offset=0):
         self.ip += offset
@@ -63,23 +69,29 @@ class IntCodeMachine:
         self.halted = opcode % 100 == self.halt_code
 
     def read(self, mode=0, offset=0):
-        if mode:
+        if mode == 0:
+            return self.memory[self.memory[self.ip + offset]]
+        elif mode == 1:
             return self.memory[self.ip + offset]
-        return self.memory[self.memory[self.ip + offset]]
+        elif mode == 2:
+            return self.memory[self.rel_ip + self.memory[self.ip + offset]]
 
-    def write(self, value, offset=0):
-        self.memory[self.memory[self.ip + offset]] = value
+    def write(self, value, mode=0, offset=0):
+        if mode == 0:
+            self.memory[self.memory[self.ip + offset]] = value
+        elif mode ==2:
+            self.memory[self.rel_ip + self.memory[self.ip + offset]] = value
 
     def read_block(self, length, modes):
         return (self.read(mode=m, offset=1+n) for m, n in zip(modes, range(length)))
 
     @debug_wrapper
     def math2(self, opcode, func):
-        a_mode, b_mode, _ = get_param_modes(opcode)
+        a_mode, b_mode, c_mode = get_param_modes(opcode)
         a, b = self.read_block(2, (a_mode, b_mode))
-        self.write(func(a, b), offset=3)
+        self.write(func(a, b), mode=c_mode, offset=3)
         self.ip += 4
-        return f'{opcode=}, {func=}, {a=}, {a_mode=}, {b=}, {b_mode=}'
+        return f'{opcode=}, {func=}, {a=}, {a_mode=}, {b=}, {b_mode=}, {c_mode=}'
 
     @debug_wrapper
     def input(self, opcode, write):
@@ -90,7 +102,7 @@ class IntCodeMachine:
             if not self.input_buffer:
                 self.paused = True
                 return f'{opcode=}, {mode=}, paused'
-            self.write(self.input_buffer.pop(0), 1)
+            self.write(self.input_buffer.pop(0), mode=mode, offset=1)
         self.ip += 2
         return f'{opcode=}, {mode=}'
 
@@ -105,3 +117,11 @@ class IntCodeMachine:
         else:
             self.ip += 3
         return f'{opcode=}, {jmp_if_false=}, {val=}, {jmp_to=}'
+
+    @debug_wrapper
+    def rel_ip_change(self, opcode):
+        a_mode, *_ = get_param_modes(opcode)
+        rel_change = self.read(mode=a_mode, offset=1)
+        self.rel_ip += rel_change
+        self.ip += 2
+        return f'{opcode=}, {rel_change=}, {self.rel_ip=}'
